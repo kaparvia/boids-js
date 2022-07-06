@@ -4,15 +4,13 @@
  * Version 1: 25ms at 1,000 boids, 15ms at 600 boids
  *
  * TODO:
- * (1) Predator can eat boids
- * (2) Optimize rules: Combine loops?
- * (3) Boids change color based on angle (fake sunlight reflection)
- * (4) Infection mode
- * (5) Zombie mode
- * (6) Predator goes after the closest, not the center of mass
+ * (1) Optimize rules: Combine loops?
+ * (2) Boids change color based on angle (fake sunlight reflection)
+ * (3) Infection mode
+ * (4) Zombie mode
  *
  */
-const NOF_BOIDS = 1000;
+const NOF_BOIDS = 100;
 const FLAG_LOG_TIMING = false;
 const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
 
@@ -21,9 +19,11 @@ const COLLISION_DISTANCE = 10;
 const VIEW_DISTANCE_BOID = 200;
 const VIEW_DISTANCE_PREDATOR = 400;
 const MAX_SPEED = 8;
-const MAX_SPEED_PREDATOR = 7;
+const MAX_SPEED_PREDATOR = 9;
+const PREDATOR_KILL_DISTANCE = 10;
 
 const FACTOR_CENTERING = 0.005;
+const FACTOR_PREDATOR_HUNT = 0.1;
 const FACTOR_COLLISION = 0.1;
 const FACTOR_BOUNDARY = 0.5;
 const FACTOR_MATCHING = 0.05;
@@ -34,7 +34,8 @@ const SIZE_BOID = 1.5;
 const SIZE_PREDATOR = 3.0;
 const HISTORY_LENGTH_BOID = 5;
 const HISTORY_LENGTH_PREDATOR = 50;
-
+const SPLASH_TIMER_START = 10;
+const SPLASH_SIZE = 10;
 
 // Global variables
 let canvasWidth = 100;
@@ -42,6 +43,35 @@ let canvasHeight = 100;
 let isPredator = false;
 
 let boids = new Array();
+let splashes = new Array();
+
+//---------------------------------------------------------------------------
+// Splash
+//---------------------------------------------------------------------------
+class Splash {
+    constructor(location) {
+        this.location = location;
+        this.timer = SPLASH_TIMER_START;
+    }
+
+    animate(ctx) {
+
+        // Alpha goes down and size goes up over the lifetime of the splash
+        let alpha = 1 - (SPLASH_TIMER_START - this.timer) / SPLASH_TIMER_START;
+        let size = 5 + SPLASH_SIZE * ((SPLASH_TIMER_START - this.timer) / SPLASH_TIMER_START);
+
+        ctx.beginPath();
+
+        ctx.fillStyle = 'rgba(255,38,0,' + alpha + ')';
+        ctx.arc(this.location.x,this.location.y, size, 0, 2 * Math.PI);
+        ctx.fill();
+
+        this.timer--;
+
+        // Return true if the splash is done
+        return this.timer == 0;
+    }
+}
 
 //---------------------------------------------------------------------------
 // Vector
@@ -59,16 +89,22 @@ class Vector {
     add(vector) {
         this.x += vector.x;
         this.y += vector.y;
+
+        return this;
     }
 
     subtract(vector) {
         this.x -= vector.x;
         this.y -= vector.y;
+
+        return this;
     }
 
     multiply(scalar) {
         this.x *= scalar;
         this.y *= scalar;
+
+        return this;
     }
 
     static subtract(vector1, vector2) {
@@ -83,7 +119,7 @@ class Boid  {
      constructor() {
          this.location = new Vector(Math.random() * canvasWidth, Math.random() * canvasHeight);
          this.velocity = new Vector(Math.random() * 2 - 1, Math.random() * 2 - 1);
-         this.velcityMultiplier = (Math.random() * VELOCITY_RANGE) + (1 - VELOCITY_RANGE / 2);
+         this.velocityMultiplier = (Math.random() * VELOCITY_RANGE) + (1 - VELOCITY_RANGE / 2);
          this.predator = false;
          this.history = new Array();
     }
@@ -94,32 +130,80 @@ class Boid  {
     }
 
     updateLocation() {
-        this.location.x += this.velocity.x * this.velcityMultiplier;
-        this.location.y += this.velocity.y * this.velcityMultiplier;
+        this.location.x += this.velocity.x * this.velocityMultiplier;
+        this.location.y += this.velocity.y * this.velocityMultiplier;
 
-        // Add the new location to the end of the history list and drop the first element in the list
+        // Add the new location to the end of the history list
         this.history.push(new Vector(this.location.x, this.location.y));
-        this.history = this.history.slice(-1 * (this.predator ? HISTORY_LENGTH_PREDATOR : HISTORY_LENGTH_BOID));
+
+        // If we're maxed out, drop first element
+        if (this.predator) {
+            if (this.history.length > HISTORY_LENGTH_PREDATOR) this.history.shift();
+        } else {
+            if (this.history.length > HISTORY_LENGTH_BOID) this.history.shift();
+        }
     }
 }
 
 //---------------------------------------------------------------------------
 // Rules
 //---------------------------------------------------------------------------
+function rule1_predatorFindNearest(predatorBoid) {
 
-// RULE 1: Boids try to fly towards the center of mass of all boids
+    let nearestBoid;
+    let nearestDirection;
+    let shortestDistance = 999999;
+
+    // Find the closest boid that we can see
+    for(let otherBoid of boids) {
+        if (otherBoid === predatorBoid) continue;
+
+        let direction = Vector.subtract(predatorBoid.location, otherBoid.location);
+        let distance = direction.length();
+
+        if (distance < VIEW_DISTANCE_PREDATOR && distance < shortestDistance) {
+
+            nearestBoid = otherBoid;
+            nearestDirection = direction;
+            shortestDistance = distance;
+        }
+    }
+    // Did we see prey?
+    if (typeof nearestDirection !== 'undefined') {
+
+        // If we're super close, eat it!
+        if (shortestDistance < PREDATOR_KILL_DISTANCE) {
+            splashes.push(new Splash(nearestBoid.location));
+            boids.splice(boids.indexOf(nearestBoid), 1);
+
+        } else {
+            // Otherwise fly closer and match velocity
+            let adjustVector = new Vector(nearestDirection.x, nearestDirection.y).multiply(-1 * FACTOR_PREDATOR_HUNT);
+            let nearestVelocity = new Vector(nearestBoid.velocity.x, nearestBoid.velocity.y).multiply(-1.5 * FACTOR_MATCHING);
+
+            adjustVector.add(nearestVelocity);
+            predatorBoid.adjustVelocity(adjustVector);
+        }
+    }
+}
+
+// RULE 1: Boids try to fly towards the center of mass of visible (nearest) boids
 function rule1_centerOfLocalMass() {
     for(let currentBoid of boids) {
 
+        if (currentBoid.predator) {
+            rule1_predatorFindNearest(currentBoid);
+            continue;
+        }
         // Get center of mass
         let center = new Vector();
         let neighborCount = 0;
 
         for(let otherBoid of boids) {
-            let distance = Vector.subtract(currentBoid.location, otherBoid.location);
+            let direction = Vector.subtract(currentBoid.location, otherBoid.location);
             let viewDistance = currentBoid.predator ?  VIEW_DISTANCE_PREDATOR : VIEW_DISTANCE_BOID;
 
-            if (distance.length() < viewDistance) {
+            if (direction.length() < viewDistance) {
                 center.add(otherBoid.location);
                 neighborCount++;
             }
@@ -322,6 +406,17 @@ function drawBoids() {
     }
 }
 
+function drawSplashes() {
+    const ctx = document.getElementById('boidCanvas').getContext('2d');
+
+    for(let splash of splashes) {
+        if (splash.animate(ctx) == true) {
+            // Remove
+            splashes.splice(splashes.indexOf(splash), 1);
+        }
+    }
+}
+
 //---------------------------------------------------------------------------
 // Main
 //---------------------------------------------------------------------------
@@ -349,6 +444,7 @@ function updateBoids() {
 function animationLoop() {
     updateBoids();
     drawBoids();
+    drawSplashes();
 
     if (FLAG_LOG_TIMING) console.timeEnd("Frame");
     if (FLAG_LOG_TIMING) console.time("Frame");

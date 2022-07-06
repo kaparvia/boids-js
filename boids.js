@@ -1,28 +1,49 @@
 "use strict"
 
-const NOF_BOIDS = 500;
-
-const HISTORY_LENGTH = 30;
+/*****
+ * Version 1: 25ms at 1,000 boids, 15ms at 600 boids
+ *
+ * TODO:
+ * (1) Predator can eat boids
+ * (2) Optimize rules: Combine loops?
+ * (3) Boids change color based on angle (fake sunlight reflection)
+ * (4) Infection mode
+ * (5) Zombie mode
+ *
+ */
+const NOF_BOIDS = 1000;
+const FLAG_LOG_TIMING = false;
 
 // Algorithm configuration
 const COLLISION_DISTANCE = 10;
-const VIEW_DISTANCE = 300;
+const VIEW_DISTANCE_BOID = 200;
+const VIEW_DISTANCE_PREDATOR = 400;
 const MAX_SPEED = 8;
+const MAX_SPEED_PREDATOR = 7;
 
 const FACTOR_CENTERING = 0.005;
 const FACTOR_COLLISION = 0.1;
 const FACTOR_BOUNDARY = 0.5;
 const FACTOR_MATCHING = 0.05;
-const FACTOR_INFECTION = 0.01;
+const FACTOR_PREDATOR_AVOIDANCE = 0.009;
+
+// Visualization parameters
+const SIZE_BOID = 1.5;
+const SIZE_PREDATOR = 3.0;
+const HISTORY_LENGTH_BOID = 5;
+const HISTORY_LENGTH_PREDATOR = 50;
+
 
 // Global variables
 let canvasWidth = 100;
 let canvasHeight = 100;
-let frameCounter = 1;
+let isPredator = false;
 
 let boids = new Array();
 
-
+//---------------------------------------------------------------------------
+// Vector
+//---------------------------------------------------------------------------
 class Vector {
     constructor(x = 0, y= 0) {
         this.x = x;
@@ -54,13 +75,13 @@ class Vector {
 }
 
 //---------------------------------------------------------------------------
-// Boids
+// Boid
 //---------------------------------------------------------------------------
 class Boid  {
      constructor() {
          this.location = new Vector(Math.random() * canvasWidth, Math.random() * canvasHeight);
          this.velocity = new Vector(Math.random() * 2 - 1, Math.random() * 2 - 1);
-         this.infection = false;
+         this.predator = false;
          this.history = new Array();
     }
 
@@ -73,8 +94,9 @@ class Boid  {
         this.location.x += this.velocity.x;
         this.location.y += this.velocity.y;
 
+        // Add the new location to the end of the history list and drop the first element in the list
         this.history.push(new Vector(this.location.x, this.location.y));
-        this.history = this.history.slice(-1 * HISTORY_LENGTH);
+        this.history = this.history.slice(-1 * (this.predator ? HISTORY_LENGTH_PREDATOR : HISTORY_LENGTH_BOID));
     }
 }
 
@@ -92,8 +114,7 @@ function rule1_centerOfLocalMass() {
 
         for(let otherBoid of boids) {
             let distance = Vector.subtract(currentBoid.location, otherBoid.location);
-
-            let viewDistance = currentBoid.infection ? VIEW_DISTANCE * 1.1 : VIEW_DISTANCE;
+            let viewDistance = currentBoid.predator ?  VIEW_DISTANCE_PREDATOR : VIEW_DISTANCE_BOID;
 
             if (distance.length() < viewDistance) {
                 center.add(otherBoid.location);
@@ -111,8 +132,10 @@ function rule1_centerOfLocalMass() {
 
 // RULE 2: Boids try to keep a small distance away from other boids
 function rule2_CollisionAvoidance() {
-
     for(let currentBoid of boids) {
+
+        if (currentBoid.predator) continue;
+
         let adjust_vector = new Vector();
 
         for(let otherBoid of boids) {
@@ -130,8 +153,9 @@ function rule2_CollisionAvoidance() {
 
 // RULE 3: Boids try to match velocity with near boids
 function rule3_MatchVelocity() {
-
     for(let currentBoid of boids) {
+
+        if (currentBoid.predator) continue;
 
         let adjust_vector = new Vector();
 
@@ -148,7 +172,6 @@ function rule3_MatchVelocity() {
 }
 
 function rule4_StayWithinBounds() {
-
     for(let boid of boids) {
         let adjust_vector = new Vector();
 
@@ -174,41 +197,35 @@ function rule4_StayWithinBounds() {
     }
 }
 
-function rule5_Infection() {
+function rule5_Predator() {
     for(let currentBoid of boids) {
 
-        if (currentBoid.infection) {
-            // currentBoid.velocity.multiply(1.1);
-            continue;
-        }
+        if (currentBoid.predator) continue;
 
         let adjust_vector = new Vector();
 
         for(let otherBoid of boids) {
-            if (otherBoid.infection) {
+            if (otherBoid.predator) {
                 let distance = Vector.subtract(currentBoid.location, otherBoid.location);
-                if (distance.length() < VIEW_DISTANCE) {
+                if (distance.length() < VIEW_DISTANCE_BOID) {
                     adjust_vector.subtract(distance);
                 }
             }
         }
-        adjust_vector.multiply(-1 * FACTOR_INFECTION);
+        adjust_vector.multiply(-1 * FACTOR_PREDATOR_AVOIDANCE);
         currentBoid.adjustVelocity(adjust_vector);
     }
 
 }
 
 function rule_LimitSpeed() {
-
     for(let boid of boids) {
 
         let speed = boid.velocity.length();
-        let maxSpeed = boid.infection ? MAX_SPEED * 1.25 : MAX_SPEED;
+        let maxSpeed = boid.predator ? MAX_SPEED_PREDATOR : MAX_SPEED;
 
         if (speed > maxSpeed) {
-            let factor = maxSpeed / speed;
-            boid.velocity.multiply(factor);
-            let new_speed = boid.velocity.length();
+            boid.velocity.multiply(maxSpeed / speed);
         }
     }
 }
@@ -216,63 +233,87 @@ function rule_LimitSpeed() {
 //---------------------------------------------------------------------------
 // Graphics
 //---------------------------------------------------------------------------
-function drawBoidTriangle(ctx, boid) {
-    const angle = Math.atan2(boid.velocity.y, boid.velocity.x);
-
-    ctx.save();
-
-    // Move origin to the boid location and rotate canvas according to the boid direction
-    ctx.translate(boid.location.x, boid.location.y);
-    ctx.rotate(angle);
+function drawBoidPoint(ctx, boid) {
+    let size;
 
     ctx.beginPath();
-    ctx.lineTo(-15, -5)
-    ctx.lineTo(-15, +5)
-    ctx.lineTo(0, 0)
-    ctx.fill();
 
-    // Restore canvas translation for the next boid
-    ctx.restore();
-}
-
-function drawBoidPoint(ctx, boid) {
-
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0)';
-
-    if (boid.infection) {
+    // Set the color and size based on the boid type
+    if (boid.predator) {
         ctx.fillStyle = 'rgba(255,38,0,1)';
-        ctx.fillRect(boid.location.x-3, boid.location.y-3, 6, 6);
+        size = SIZE_PREDATOR;
     } else {
         ctx.fillStyle = 'rgba(0,65,255,1)';
-        ctx.fillRect(boid.location.x-1, boid.location.y-1, 2, 2);
+        size = SIZE_BOID;
     }
 
-    if (HISTORY_LENGTH > 0) {
+    // Draw the circle
+    ctx.arc(boid.location.x,boid.location.y, size, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Draw the trails if they are on
+    if ( (!boid.predator && HISTORY_LENGTH_BOID > 0) || (boid.predator && HISTORY_LENGTH_PREDATOR > 0)) {
+        drawBoidTrail(ctx, boid);
+    }
+}
+
+function drawBoidTrail(ctx, boid) {
+    // Parameters for the trail color and width
+    const ALPHA_START = 0.6;
+    const ALPHA_END = 0.05;
+    const ALPHA_STEP = (ALPHA_START - ALPHA_END) / boid.history.length;
+
+    const WIDTH_PREDATOR_START = 4;
+    const WIDTH_PREDATOR_END = 0;
+    const WIDTH_PREDATOR_STEP = (WIDTH_PREDATOR_START - WIDTH_PREDATOR_END) / boid.history.length;
+
+    const WIDTH_BOID_START = 1.5;
+    const WIDTH_BOID_END = 0;
+    const WIDTH_BOID_STEP = (WIDTH_BOID_START - WIDTH_BOID_END) / boid.history.length;
+
+    let alpha =  ALPHA_START;
+    let widthPredator = WIDTH_PREDATOR_START;
+    let widthBoid = WIDTH_BOID_START;
+
+    // Reverse the history to draw from the head to tail
+    var pointList = boid.history.slice().reverse();
+    var last_point = pointList[0];
+
+    for (const point of pointList) {
 
         ctx.beginPath();
 
-        ctx.fillStyle = 'rgba(255,255,255, 0)';
-
-        if (boid.infection) {
-            ctx.strokeStyle = 'rgba(255,38,0,0.15)';
+        if (boid.predator) {
+            ctx.strokeStyle = 'rgba(255,38,0,' + alpha + ')';
+            ctx.lineWidth = widthPredator;
         } else {
-            ctx.strokeStyle = 'rgba(0,65,255,0.08)';
+            ctx.strokeStyle = 'rgba(0,65,255,' + alpha + ')';
+            ctx.lineWidth = widthBoid;
         }
 
+        alpha -= ALPHA_STEP;
+        widthPredator -= WIDTH_PREDATOR_STEP;
+        widthBoid -= WIDTH_BOID_STEP;
 
-        ctx.moveTo(boid.history[0].x, boid.history[0].y);
-        for (const point of boid.history) {
-            ctx.lineTo(point.x, point.y);
-        }
+        ctx.moveTo(last_point.x, last_point.y);
+        ctx.lineTo(point.x, point.y);
         ctx.stroke();
+
+        last_point = point;
     }
 }
 
 function drawBoids() {
-
     const ctx = document.getElementById('boidCanvas').getContext('2d');
-    ctx.clearRect(1, 1, canvasWidth-2, canvasHeight-2);
 
+    // Clear the screen and redraw the bounding box
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    ctx.strokeRect(0, 0, canvasWidth, canvasHeight);
+
+    // Draw the boids
     for (let boid of boids) {
         drawBoidPoint(ctx, boid);
     }
@@ -288,26 +329,26 @@ function createBoids() {
 }
 
 function updateBoids() {
-
-    // rule1_centerOfMass();
+    // Run the rules to update velocity vetor for all the boids. This is where the magic happens!
     rule1_centerOfLocalMass();
     rule2_CollisionAvoidance();
     rule3_MatchVelocity();
     rule4_StayWithinBounds();
-    rule5_Infection();
+    rule5_Predator();
     rule_LimitSpeed();
 
+    // Apply velocity vector to all boids to get new location
     for(let boid of boids) {
         boid.updateLocation();
     }
 }
 
 function animationLoop() {
-
-    //console.log("Frame #" + frameCounter++);
-
     updateBoids();
     drawBoids();
+
+    if (FLAG_LOG_TIMING) console.timeEnd("Frame");
+    if (FLAG_LOG_TIMING) console.time("Frame");
 
     window.requestAnimationFrame(animationLoop);
 }
@@ -318,42 +359,35 @@ window.onload = () => {
     canvasWidth = canvas.width;
     canvasHeight = canvas.height;
 
-    const ctx = canvas.getContext('2d');
-    ctx.strokeRect(0, 0, canvasWidth, canvasHeight);
-
     createBoids();
 
+    // Start animation
     window.requestAnimationFrame(animationLoop);
 }
-
-
-let isPredator = false;
 
 window.onclick = () => {
 
     if (!isPredator) {
         let predator = new Boid();
+
+        // Predator starts from the top left corner heading down at speed
         predator.location.x = 1;
         predator.location.y = 1;
         predator.velocity.x = 5;
         predator.velocity.y = 5;
-        predator.infection = true;
+        predator.predator = true;
+
+        // Add predator to the end of the boid list
         boids.push(predator);
         isPredator = true;
     } else {
+
+        // Remove predator from the end of the boid list
         boids.pop();
         isPredator = false;
     }
-
-//     // if (index > 0) {
-//     //     boids[index].infection = false;
-//     //     index = -1;
-//     // } else {
-//     //     index = Math.floor(Math.random() * boids.length);
-//     //     boids[index].infection = true;
-//     // }
 }
-//
+// DEBUG
 // createBoids();
 // updateBoids();
 // console.log("");

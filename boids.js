@@ -9,10 +9,12 @@
  * (3) Boids change color based on angle (fake sunlight reflection)
  * (4) Infection mode
  * (5) Zombie mode
+ * (6) Predator goes after the closest, not the center of mass
  *
  */
 const NOF_BOIDS = 1000;
 const FLAG_LOG_TIMING = false;
+const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
 
 // Algorithm configuration
 const COLLISION_DISTANCE = 10;
@@ -81,6 +83,7 @@ class Boid  {
      constructor() {
          this.location = new Vector(Math.random() * canvasWidth, Math.random() * canvasHeight);
          this.velocity = new Vector(Math.random() * 2 - 1, Math.random() * 2 - 1);
+         this.velcityMultiplier = (Math.random() * VELOCITY_RANGE) + (1 - VELOCITY_RANGE / 2);
          this.predator = false;
          this.history = new Array();
     }
@@ -91,8 +94,8 @@ class Boid  {
     }
 
     updateLocation() {
-        this.location.x += this.velocity.x;
-        this.location.y += this.velocity.y;
+        this.location.x += this.velocity.x * this.velcityMultiplier;
+        this.location.y += this.velocity.y * this.velcityMultiplier;
 
         // Add the new location to the end of the history list and drop the first element in the list
         this.history.push(new Vector(this.location.x, this.location.y));

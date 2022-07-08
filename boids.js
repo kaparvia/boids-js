@@ -1,7 +1,9 @@
 "use strict"
 
 /*****
- * Version 1: 25ms at 1,000 boids, 15ms at 600 boids
+ * Version 1: 25ms at 1,000 boids, baseline 15ms up to 600 boids
+ * Version 2: 60ms at 1,000 boids, baseline 17ms up to 350 boids (trail 25)
+ * Version 3: 32ms at 1,000 boids, baseline 17ms up to 730 boids (quick trail draw)
  *
  * TODO:
  * (1) Optimize rules:
@@ -15,7 +17,8 @@
  * (5) Sound when eating
  *
  *  BUGS:
- *  - Framerate dropped dramatically
+ *  - Quick tail drawing leaves black pixels in the middle of the trail
+ *  - Make sure all coordinates are ints when drawing (avoids anti-aliasing so not sure if looks good)
  */
 const FLAG_LOG_TIMING = false;
 const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
@@ -37,10 +40,15 @@ const FACTOR_PREDATOR_MATCHING = 0.02;
 // Visualization parameters
 const SIZE_BOID = 1.5;
 const SIZE_PREDATOR = 3.0;
-const HISTORY_LENGTH_BOID = 25;
-const HISTORY_LENGTH_PREDATOR = 30;
 const SPLASH_TIMER_START = 5;
 const SPLASH_SIZE = 6;
+
+// Drawing the tail properly takes a lot of cycles so they're disabled by default
+// to use a cheaper method. Turn this flag on to switch to the expensive but pretties
+// method.
+const TAIL_TRACKING_ON = false;
+const TAIL_LENGTH_BOID = 20;
+const TAIL_LENGTH_PREDATOR = 30;
 
 // GUI configurable parameters
 let ANIMATION_ENABLED = true;
@@ -180,17 +188,20 @@ class Boid  {
     }
 
     updateLocation() {
+        this.lastLocation = new Vector(this.location.x, this.location.y);
         this.location.x += this.velocity.x * this.velocityMultiplier;
         this.location.y += this.velocity.y * this.velocityMultiplier;
 
-        // Add the new location to the end of the history list
-        this.history.push(new Vector(this.location.x, this.location.y));
+        // Add the new location to the end of the history list for tail drawing
+        if (TAIL_TRACKING_ON) {
+            this.history.push(new Vector(this.location.x, this.location.y));
 
-        // If we're maxed out, drop first element
-        if (this.predator) {
-            if (this.history.length > HISTORY_LENGTH_PREDATOR) this.history.shift();
-        } else {
-            if (this.history.length > HISTORY_LENGTH_BOID) this.history.shift();
+            // If we're maxed out, drop first element
+            if (this.predator) {
+                if (this.history.length > TAIL_LENGTH_PREDATOR) this.history.shift();
+            } else {
+                if (this.history.length > TAIL_LENGTH_BOID) this.history.shift();
+            }
         }
     }
 }
@@ -392,13 +403,45 @@ function drawBoidPoint(ctx, boid) {
     // Draw the circle
     ctx.arc(boid.location.x,boid.location.y, size, 0, 2 * Math.PI);
     ctx.fill();
-
-    // Draw the trails if they are on
-    if ( (!boid.predator && HISTORY_LENGTH_BOID > 0) || (boid.predator && HISTORY_LENGTH_PREDATOR > 0)) {
-        drawBoidTrail(ctx, boid);
-    }
 }
 
+// Draw just one segment trail behind the boid and remove the boid from the last
+// location. This method is used when the full trail drawing is not on.
+//
+// Used when TAIL_TRACKING_ON == false
+function drawBoidTrailShort(ctx, boid) {
+
+    if (boid.lastLocation === undefined) return;
+
+    // Overwrite the previous boid location with a black circle
+    ctx.beginPath();
+    ctx.fillStyle = 'black';
+
+    ctx.arc(boid.lastLocation.x,boid.lastLocation.y,
+        boid.predator ? SIZE_PREDATOR : SIZE_BOID,
+        0, 2 * Math.PI);
+    ctx.fill();
+
+    // Draw a line between current location and the previous location
+    ctx.beginPath();
+
+    if (boid.predator) {
+        ctx.strokeStyle = 'rgb(255,38,0)';
+        ctx.lineWidth = 3;
+    } else {
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1;
+    }
+
+    ctx.moveTo(boid.lastLocation.x, boid.lastLocation.y);
+    ctx.lineTo(boid.location.x, boid.location.y);
+    ctx.stroke();
+}
+
+// Complete trail drawing method. Trail is completely drawn every frame, with full
+// narrowing and fading. Looks better is much more expensive.
+//
+// Run when TAIL_TRACKING_ON == true
 function drawBoidTrail(ctx, boid) {
     // Parameters for the trail color and width
     const ALPHA_START = 0.6;
@@ -451,6 +494,15 @@ function drawBoids() {
     // Draw the boids
     for (let boid of boids) {
         drawBoidPoint(ctx, boid);
+
+        // Draw the trails if they are on
+        if (ANIMATION_ENABLED) {
+            if (TAIL_TRACKING_ON) {
+                drawBoidTrail(ctx, boid);
+            } else {
+                drawBoidTrailShort(ctx, boid);
+            }
+        }
     }
 }
 
@@ -505,12 +557,18 @@ function updateBoids() {
 
 // Time stamp used for FPS calculation
 let lastTime = Date.now();
+let fpsArray = [];
+const AVERAGES = 30;
 
 function animationLoop() {
 
     // Update frame timing and save timestamp for the next frame
     fpsCounter = Date.now() - lastTime;
     lastTime = Date.now();
+
+    // Update average array
+    fpsArray.push(fpsCounter);
+    if (fpsArray.length > AVERAGES) fpsArray.shift();
 
     drawUI();
 

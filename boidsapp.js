@@ -29,13 +29,25 @@ let lastGUIElementUpdate = Date.now();
 function drawUI() {
     const ctx = document.getElementById('boidCanvas').getContext('2d');
 
+    // If we're using the cheap tail drawing, all we need to do is to erase last frame
+    // only partially. This way the rail remains and gets dimmer over time due to
+    // multiple partial erasures.
+    let alpha;
+
+    if (TAIL_TRACKING_ON) {
+        alpha = 1.0;
+    } else {
+        alpha = 0.05;
+    }
+
     // Clear the canvas
-    ctx.fillStyle = 'black';
+    ctx.fillStyle = 'rgba(0,0,0,' + alpha + ')';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
     // Update FPS counter every second
     if ( (Date.now() - lastGUIElementUpdate) > 1000) {
-        divFps.innerHTML = Math.floor(fpsCounter) + "ms";
+        // Calculate average
+        divFps.innerHTML = Math.floor(fpsArray.reduce((a,b) => a+b) / fpsArray.length) + "ms";
         lastGUIElementUpdate = Date.now();
     }
 }

@@ -4,13 +4,19 @@
  * Version 1: 25ms at 1,000 boids, 15ms at 600 boids
  *
  * TODO:
- * (1) Optimize rules: Combine loops?
+ * (1) Optimize rules:
+ *      - Combine loops?
+ *      - Tiling algorithm
+ *      - DBSCAN (https://adamprice.io/blog/boids.html)
+ *
  * (2) Boids change color based on angle (fake sunlight reflection)
  * (3) Infection mode
  * (4) Zombie mode
+ * (5) Sound when eating
  *
+ *  BUGS:
+ *  - Framerate dropped dramatically
  */
-const NOF_BOIDS = 100;
 const FLAG_LOG_TIMING = false;
 const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
 
@@ -18,8 +24,6 @@ const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
 const COLLISION_DISTANCE = 10;
 const VIEW_DISTANCE_BOID = 200;
 const VIEW_DISTANCE_PREDATOR = 400;
-const MAX_SPEED = 8;
-const MAX_SPEED_PREDATOR = 9;
 const PREDATOR_KILL_DISTANCE = 10;
 
 const FACTOR_CENTERING = 0.005;
@@ -28,22 +32,29 @@ const FACTOR_COLLISION = 0.1;
 const FACTOR_BOUNDARY = 0.5;
 const FACTOR_MATCHING = 0.05;
 const FACTOR_PREDATOR_AVOIDANCE = 0.009;
+const FACTOR_PREDATOR_MATCHING = 0.02;
 
 // Visualization parameters
 const SIZE_BOID = 1.5;
 const SIZE_PREDATOR = 3.0;
-const HISTORY_LENGTH_BOID = 5;
-const HISTORY_LENGTH_PREDATOR = 50;
-const SPLASH_TIMER_START = 10;
-const SPLASH_SIZE = 10;
+const HISTORY_LENGTH_BOID = 25;
+const HISTORY_LENGTH_PREDATOR = 30;
+const SPLASH_TIMER_START = 5;
+const SPLASH_SIZE = 6;
+
+// GUI configurable parameters
+let ANIMATION_ENABLED = true;
+let NOF_BOIDS = 100;
+let MAX_SPEED = 8;
+let MAX_SPEED_PREDATOR = 9;
 
 // Global variables
-let canvasWidth = 100;
-let canvasHeight = 100;
-let isPredator = false;
+let canvasWidth;
+let canvasHeight;
+let fpsCounter;
 
-let boids = new Array();
-let splashes = new Array();
+let boids = [];
+let splashes = [];
 
 //---------------------------------------------------------------------------
 // Splash
@@ -69,7 +80,7 @@ class Splash {
         this.timer--;
 
         // Return true if the splash is done
-        return this.timer == 0;
+        return this.timer === 0;
     }
 }
 
@@ -117,11 +128,50 @@ class Vector {
 //---------------------------------------------------------------------------
 class Boid  {
      constructor() {
-         this.location = new Vector(Math.random() * canvasWidth, Math.random() * canvasHeight);
-         this.velocity = new Vector(Math.random() * 2 - 1, Math.random() * 2 - 1);
+
+         // Boids are created at the edes of the canvas, with a random vector pointing inwards
+         let x=0,y=0,dx=0,dy=0;
+
+         // Pick the edge
+         switch(Math.floor(Math.random()*4) + 1) {
+
+             // Left
+             case 1:
+                x = 0;
+                y = Math.random() * canvasHeight;
+                dx = Math.random() * 2;
+                dy = Math.random() * 2 - 1;
+                break;
+
+             // Right
+             case 2:
+                 x = canvasWidth;
+                 y = Math.random() * canvasHeight;
+                 dx = Math.random() * -2;
+                 dy = Math.random() * 2 - 1;
+                 break;
+
+             // Top
+             case 3:
+                 x = Math.random() * canvasWidth;
+                 y = 0;
+                 dx = Math.random() * 2 - 1;
+                 dy = Math.random() * 2;
+                 break;
+
+             // Bottom
+             case 4:
+                 x = Math.random() * canvasWidth;
+                 y = canvasHeight;
+                 dx = Math.random() * 2 - 1;
+                 dy = Math.random() * -2;
+         }
+
+         this.location = new Vector(x, y);
+         this.velocity = new Vector(dx, dy);
          this.velocityMultiplier = (Math.random() * VELOCITY_RANGE) + (1 - VELOCITY_RANGE / 2);
          this.predator = false;
-         this.history = new Array();
+         this.history = [];
     }
 
     adjustVelocity(vector) {
@@ -175,11 +225,13 @@ function rule1_predatorFindNearest(predatorBoid) {
         if (shortestDistance < PREDATOR_KILL_DISTANCE) {
             splashes.push(new Splash(nearestBoid.location));
             boids.splice(boids.indexOf(nearestBoid), 1);
+            NOF_BOIDS--;
+            updateCountSlider();
 
         } else {
             // Otherwise fly closer and match velocity
             let adjustVector = new Vector(nearestDirection.x, nearestDirection.y).multiply(-1 * FACTOR_PREDATOR_HUNT);
-            let nearestVelocity = new Vector(nearestBoid.velocity.x, nearestBoid.velocity.y).multiply(-1.5 * FACTOR_MATCHING);
+            let nearestVelocity = new Vector(nearestBoid.velocity.x, nearestBoid.velocity.y).multiply(-1 * FACTOR_PREDATOR_MATCHING);
 
             adjustVector.add(nearestVelocity);
             predatorBoid.adjustVelocity(adjustVector);
@@ -258,6 +310,7 @@ function rule3_MatchVelocity() {
     }
 }
 
+// RULE 4: Avoid canvas edges
 function rule4_StayWithinBounds() {
     for(let boid of boids) {
         let adjust_vector = new Vector();
@@ -284,6 +337,7 @@ function rule4_StayWithinBounds() {
     }
 }
 
+// RULE 5: Run away from the predator
 function rule5_Predator() {
     for(let currentBoid of boids) {
 
@@ -305,6 +359,7 @@ function rule5_Predator() {
 
 }
 
+// RULE X: Don't exceed max speed
 function rule_LimitSpeed() {
     for(let boid of boids) {
 
@@ -330,7 +385,7 @@ function drawBoidPoint(ctx, boid) {
         ctx.fillStyle = 'rgba(255,38,0,1)';
         size = SIZE_PREDATOR;
     } else {
-        ctx.fillStyle = 'rgba(0,65,255,1)';
+        ctx.fillStyle = 'rgb(255,255,255)';
         size = SIZE_BOID;
     }
 
@@ -363,8 +418,8 @@ function drawBoidTrail(ctx, boid) {
     let widthBoid = WIDTH_BOID_START;
 
     // Reverse the history to draw from the head to tail
-    var pointList = boid.history.slice().reverse();
-    var last_point = pointList[0];
+    let pointList = boid.history.slice().reverse();
+    let last_point = pointList[0];
 
     for (const point of pointList) {
 
@@ -374,7 +429,7 @@ function drawBoidTrail(ctx, boid) {
             ctx.strokeStyle = 'rgba(255,38,0,' + alpha + ')';
             ctx.lineWidth = widthPredator;
         } else {
-            ctx.strokeStyle = 'rgba(0,65,255,' + alpha + ')';
+            ctx.strokeStyle = 'rgba(255,255,255,' + alpha + ')';
             ctx.lineWidth = widthBoid;
         }
 
@@ -393,13 +448,6 @@ function drawBoidTrail(ctx, boid) {
 function drawBoids() {
     const ctx = document.getElementById('boidCanvas').getContext('2d');
 
-    // Clear the screen and redraw the bounding box
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 1;
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    ctx.strokeRect(0, 0, canvasWidth, canvasHeight);
-
     // Draw the boids
     for (let boid of boids) {
         drawBoidPoint(ctx, boid);
@@ -410,7 +458,7 @@ function drawSplashes() {
     const ctx = document.getElementById('boidCanvas').getContext('2d');
 
     for(let splash of splashes) {
-        if (splash.animate(ctx) == true) {
+        if (splash.animate(ctx) === true) {
             // Remove
             splashes.splice(splashes.indexOf(splash), 1);
         }
@@ -424,6 +472,20 @@ function createBoids() {
     for (let i = 0; i < NOF_BOIDS; i++) {
         boids.push(new Boid());
     }
+}
+
+// Called when boid count is changed from the GUI
+function updateNumberOfBoids(newCount) {
+    if (newCount === NOF_BOIDS) return;
+
+    if (newCount < NOF_BOIDS) {
+        boids.splice(0, (NOF_BOIDS - newCount));
+    } else {
+        for(let i=NOF_BOIDS; i < newCount; i++) {
+            boids.push(new Boid());
+        }
+    }
+    NOF_BOIDS = newCount;
 }
 
 function updateBoids() {
@@ -441,53 +503,32 @@ function updateBoids() {
     }
 }
 
+// Time stamp used for FPS calculation
+let lastTime = Date.now();
+
 function animationLoop() {
-    updateBoids();
+
+    // Update frame timing and save timestamp for the next frame
+    fpsCounter = Date.now() - lastTime;
+    lastTime = Date.now();
+
+    drawUI();
+
+    if (ANIMATION_ENABLED) {
+        updateBoids();
+    }
+
     drawBoids();
     drawSplashes();
 
     if (FLAG_LOG_TIMING) console.timeEnd("Frame");
     if (FLAG_LOG_TIMING) console.time("Frame");
 
+
     window.requestAnimationFrame(animationLoop);
 }
 
-window.onload = () => {
-
-    const canvas = document.getElementById('boidCanvas');
-    canvasWidth = canvas.width;
-    canvasHeight = canvas.height;
-
-    createBoids();
-
-    // Start animation
-    window.requestAnimationFrame(animationLoop);
-}
-
-window.onclick = () => {
-
-    if (!isPredator) {
-        let predator = new Boid();
-
-        // Predator starts from the top left corner heading down at speed
-        predator.location.x = 1;
-        predator.location.y = 1;
-        predator.velocity.x = 5;
-        predator.velocity.y = 5;
-        predator.predator = true;
-
-        // Add predator to the end of the boid list
-        boids.push(predator);
-        isPredator = true;
-    } else {
-
-        // Remove predator from the end of the boid list
-        boids.pop();
-        isPredator = false;
-    }
-}
 // DEBUG
 // createBoids();
 // updateBoids();
 // console.log("");
-

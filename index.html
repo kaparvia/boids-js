@@ -3,9 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <title>Boids</title>
-    <script src="boids.js"></script>
+    <link rel="stylesheet" href="boids.css">
 </head>
 <body>
-    <canvas id="boidCanvas" width="1200" height="800"></canvas>
+    <div id="boidsApp">
+        <div id="buttons">
+            <button type="button" id="togglePredator" class="control button off">Predator</button>
+            <button type="button" id="pausePlay" class="control button on">Pause</button>
+        </div>
+
+        <div id="fps">fps</div>
+        <canvas id="boidCanvas" width="1200" height="700"></canvas>
+
+        <div id="controls">
+
+            <div class="control label">BOIDS</div>
+            <input type="range" min="1" max="2000" value="100" class="control slider" id="nofBoids">
+            <div class="control counter" id="counterNofBoids">100</div>
+
+            <div class="control label">BOID SPEED</div>
+            <input type="range" min="1" max="20" value="8" class="control slider" id="speedBoid">
+
+            <div class="control label">PREDATOR SPEED</div>
+            <input type="range" min="1" max="20" value="9" class="control slider" id="speedPredator">
+
+        </div>
+    </div>
+
+    <script src="boids.js"></script>
+    <script src="boidsapp.js"></script>
 </body>
 </html>

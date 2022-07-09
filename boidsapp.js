@@ -15,7 +15,10 @@
  */
 
 // DOM elements
-let togglePredator = document.querySelector("#togglePredator");
+let addPredator = document.querySelector("#addPredator");
+let removePredator = document.querySelector("#removePredator");
+let nofPredators = document.querySelector("#nofPredators");
+
 let pausePlay = document.querySelector("#pausePlay");
 let nofBoids = document.querySelector("#nofBoids");
 let counterNofBoids = document.querySelector("#counterNofBoids");
@@ -66,30 +69,25 @@ window.onload = () => {
     window.requestAnimationFrame(animationLoop);
 }
 
-// Click on Predator button
-togglePredator.addEventListener('click', event => {
+addPredator.addEventListener('click', event => {
 
-    // If predator is off, create it
-    if (togglePredator.classList.contains('off')) {
-        let predator = new Boid();
+    let predator = new Boid();
 
-        // Predator starts from the top left corner heading down at speed
-        predator.location.x = 1;
-        predator.location.y = 1;
-        predator.velocity.x = 5;
-        predator.velocity.y = 5;
-        predator.predator = true;
+    predator.predator = true;
 
-        // Add predator to the end of the boid list
-        boids.push(predator);
-        togglePredator.classList.replace('off', 'on');
+    predators.push(predator);
 
-    } else if (togglePredator.classList.contains('on')) {
+    nofPredators.innerHTML = predators.length;
+});
 
-        // Remove predator from the end of the boid list
-        boids.pop();
-        togglePredator.classList.replace("on", "off");
-    }
+removePredator.addEventListener('click', event => {
+
+    // togglePredator.classList.replace('off', 'on');
+
+    // Remove predator from the end of the predators list
+    predators.pop();
+
+    nofPredators.innerHTML = predators.length;
 });
 
 // Click pause/play button

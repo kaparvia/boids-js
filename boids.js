@@ -4,6 +4,7 @@
  * Version 1: 25ms at 1,000 boids, baseline 15ms up to 600 boids
  * Version 2: 60ms at 1,000 boids, baseline 17ms up to 350 boids (trail 25)
  * Version 3: 32ms at 1,000 boids, baseline 17ms up to 730 boids (quick trail draw)
+ * Version 4: 20ms at 1,000 boids, baseline 18ms up to 750 boids (separated predators)
  *
  * TODO:
  * (1) Optimize rules:
@@ -15,7 +16,6 @@
  * (3) Infection mode
  * (4) Zombie mode
  * (5) Sound when eating
- * (6) Multiple predators
  *
  *  BUGS:
  *  - Predator splash fading looks off
@@ -25,12 +25,14 @@ const FLAG_LOG_TIMING = false;
 const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
 
 // Algorithm configuration
-const COLLISION_DISTANCE = 10;
+const COLLISION_DISTANCE_BOID = 10;
+const COLLISION_DISTANCE_PREDATOR = 30;
 const VIEW_DISTANCE_BOID = 200;
 const VIEW_DISTANCE_PREDATOR = 400;
 const PREDATOR_KILL_DISTANCE = 10;
 
 const FACTOR_CENTERING = 0.005;
+const FACTOR_CENTERING_PREDATORS = 0.003;
 const FACTOR_PREDATOR_HUNT = 0.1;
 const FACTOR_COLLISION = 0.1;
 const FACTOR_BOUNDARY = 0.5;
@@ -64,6 +66,7 @@ let canvasHeight;
 let fpsCounter;
 
 let boids = [];
+let predators = [];
 let splashes = [];
 
 //---------------------------------------------------------------------------
@@ -215,62 +218,18 @@ class Boid  {
 //---------------------------------------------------------------------------
 // Rules
 //---------------------------------------------------------------------------
-function rule1_predatorFindNearest(predatorBoid) {
-
-    let nearestBoid;
-    let nearestDirection;
-    let shortestDistance = 999999;
-
-    // Find the closest boid that we can see
-    for(let otherBoid of boids) {
-        if (otherBoid === predatorBoid) continue;
-
-        let direction = Vector.subtract(predatorBoid.location, otherBoid.location);
-        let distance = direction.length();
-
-        if (distance < VIEW_DISTANCE_PREDATOR && distance < shortestDistance) {
-
-            nearestBoid = otherBoid;
-            nearestDirection = direction;
-            shortestDistance = distance;
-        }
-    }
-    // Did we see prey?
-    if (typeof nearestDirection !== 'undefined') {
-
-        // If we're super close, eat it!
-        if (shortestDistance < PREDATOR_KILL_DISTANCE) {
-            splashes.push(new Splash(nearestBoid.location));
-            boids.splice(boids.indexOf(nearestBoid), 1);
-            NOF_BOIDS--;
-            updateCountSlider();
-
-        } else {
-            // Otherwise fly closer and match velocity
-            let adjustVector = new Vector(nearestDirection.x, nearestDirection.y).multiply(-1 * FACTOR_PREDATOR_HUNT);
-            let nearestVelocity = new Vector(nearestBoid.velocity.x, nearestBoid.velocity.y).multiply(-1 * FACTOR_PREDATOR_MATCHING);
-
-            adjustVector.add(nearestVelocity);
-            predatorBoid.adjustVelocity(adjustVector);
-        }
-    }
-}
 
 // RULE 1: Boids try to fly towards the center of mass of visible (nearest) boids
-function rule1_centerOfLocalMass() {
-    for(let currentBoid of boids) {
+function rule1_centerOfLocalMass(arrayBoids) {
+    for(let currentBoid of arrayBoids) {
 
-        if (currentBoid.predator) {
-            rule1_predatorFindNearest(currentBoid);
-            continue;
-        }
         // Get center of mass
         let center = new Vector();
         let neighborCount = 0;
 
-        for(let otherBoid of boids) {
+        for(let otherBoid of arrayBoids) {
             let direction = Vector.subtract(currentBoid.location, otherBoid.location);
-            let viewDistance = currentBoid.predator ?  VIEW_DISTANCE_PREDATOR : VIEW_DISTANCE_BOID;
+            let viewDistance = currentBoid.predator ? VIEW_DISTANCE_PREDATOR : VIEW_DISTANCE_BOID;
 
             if (direction.length() < viewDistance) {
                 center.add(otherBoid.location);
@@ -281,23 +240,21 @@ function rule1_centerOfLocalMass() {
         center.multiply(1/neighborCount);
 
         let adjust_vector = Vector.subtract(currentBoid.location, center);
-        adjust_vector.multiply(-1 * FACTOR_CENTERING);
+        adjust_vector.multiply(-1 * (currentBoid.predator ? FACTOR_CENTERING_PREDATORS : FACTOR_CENTERING));
         currentBoid.adjustVelocity(adjust_vector);
     }
 }
 
 // RULE 2: Boids try to keep a small distance away from other boids
-function rule2_CollisionAvoidance() {
+function rule2_CollisionAvoidance(arrayBoids) {
     for(let currentBoid of boids) {
-
-        if (currentBoid.predator) continue;
 
         let adjust_vector = new Vector();
 
-        for(let otherBoid of boids) {
+        for(let otherBoid of arrayBoids) {
             if (otherBoid !== currentBoid) {
                 let distance = Vector.subtract(currentBoid.location, otherBoid.location);
-                if (distance.length() < COLLISION_DISTANCE) {
+                if (distance.length() < (currentBoid.predator ? COLLISION_DISTANCE_PREDATOR : COLLISION_DISTANCE_BOID)) {
                     adjust_vector.subtract(distance);
                 }
             }
@@ -310,8 +267,6 @@ function rule2_CollisionAvoidance() {
 // RULE 3: Boids try to match velocity with near boids
 function rule3_MatchVelocity() {
     for(let currentBoid of boids) {
-
-        if (currentBoid.predator) continue;
 
         let adjust_vector = new Vector();
 
@@ -328,24 +283,24 @@ function rule3_MatchVelocity() {
 }
 
 // RULE 4: Avoid canvas edges
-function rule4_StayWithinBounds() {
-    for(let boid of boids) {
+function rule_StayWithinBounds(arrayBoids) {
+    for(let boid of arrayBoids) {
         let adjust_vector = new Vector();
 
-        if (boid.location.x < COLLISION_DISTANCE) {
+        if (boid.location.x < COLLISION_DISTANCE_BOID) {
             adjust_vector.x += Math.abs(boid.location.x);
         }
 
-        if (boid.location.y < COLLISION_DISTANCE) {
+        if (boid.location.y < COLLISION_DISTANCE_BOID) {
             adjust_vector.y += Math.abs(boid.location.y);
         }
 
-        if (boid.location.x > (canvasWidth - COLLISION_DISTANCE)) {
-            adjust_vector.x -= Math.abs(canvasWidth - COLLISION_DISTANCE);
+        if (boid.location.x > (canvasWidth - COLLISION_DISTANCE_BOID)) {
+            adjust_vector.x -= Math.abs(canvasWidth - COLLISION_DISTANCE_BOID);
         }
 
-        if (boid.location.y > (canvasHeight - COLLISION_DISTANCE)) {
-            adjust_vector.y -= Math.abs(canvasHeight - COLLISION_DISTANCE);
+        if (boid.location.y > (canvasHeight - COLLISION_DISTANCE_BOID)) {
+            adjust_vector.y -= Math.abs(canvasHeight - COLLISION_DISTANCE_BOID);
         }
 
         adjust_vector.multiply(FACTOR_BOUNDARY);
@@ -355,20 +310,19 @@ function rule4_StayWithinBounds() {
 }
 
 // RULE 5: Run away from the predator
-function rule5_Predator() {
-    for(let currentBoid of boids) {
+function rule_PredatorAvoidance() {
 
-        if (currentBoid.predator) continue;
+    if (predators.length == 0) return;
+
+    for(let currentBoid of boids) {
 
         let adjust_vector = new Vector();
 
-        for(let otherBoid of boids) {
-            if (otherBoid.predator) {
-                let distance = Vector.subtract(currentBoid.location, otherBoid.location);
-                if (distance.length() < VIEW_DISTANCE_BOID) {
-                    adjust_vector.subtract(distance);
+        for(let predator of predators) {
+            let distance = Vector.subtract(currentBoid.location, predator.location);
+            if (distance.length() < VIEW_DISTANCE_BOID) {
+                adjust_vector.subtract(distance);
                 }
-            }
         }
         adjust_vector.multiply(-1 * FACTOR_PREDATOR_AVOIDANCE);
         currentBoid.adjustVelocity(adjust_vector);
@@ -376,9 +330,51 @@ function rule5_Predator() {
 
 }
 
+function rule_predatorsHunt() {
+
+    for (let predatorBoid of predators) {
+        let nearestBoid;
+        let nearestDirection;
+        let shortestDistance = 999999;
+
+        // Find the closest boid that we can see
+        for (let otherBoid of boids) {
+
+            let direction = Vector.subtract(predatorBoid.location, otherBoid.location);
+            let distance = direction.length();
+
+            if (distance < VIEW_DISTANCE_PREDATOR && distance < shortestDistance) {
+
+                nearestBoid = otherBoid;
+                nearestDirection = direction;
+                shortestDistance = distance;
+            }
+        }
+        // Did we see prey?
+        if (typeof nearestDirection !== 'undefined') {
+
+            // If we're super close, eat it!
+            if (shortestDistance < PREDATOR_KILL_DISTANCE) {
+                splashes.push(new Splash(nearestBoid.location));
+                boids.splice(boids.indexOf(nearestBoid), 1);
+                NOF_BOIDS--;
+                updateCountSlider();
+
+            } else {
+                // Otherwise fly closer and match velocity
+                let adjustVector = new Vector(nearestDirection.x, nearestDirection.y).multiply(-1 * FACTOR_PREDATOR_HUNT);
+                let nearestVelocity = new Vector(nearestBoid.velocity.x, nearestBoid.velocity.y).multiply(-1 * FACTOR_PREDATOR_MATCHING);
+
+                adjustVector.add(nearestVelocity);
+                predatorBoid.adjustVelocity(adjustVector);
+            }
+        }
+    }
+}
+
 // RULE X: Don't exceed max speed
-function rule_LimitSpeed() {
-    for(let boid of boids) {
+function rule_LimitSpeed(arrayBoids) {
+    for(let boid of arrayBoids) {
 
         let speed = boid.velocity.length();
         let maxSpeed = boid.predator ? MAX_SPEED_PREDATOR : MAX_SPEED;
@@ -519,6 +515,19 @@ function drawBoids() {
             }
         }
     }
+
+    for (let boid of predators) {
+        drawBoidPoint(ctx, boid);
+
+        // Draw the trails if they are on
+        if (ANIMATION_ENABLED) {
+            if (TAIL_TRACKING_ON) {
+                drawBoidTrail(ctx, boid);
+            } else {
+                drawBoidTrailShort(ctx, boid);
+            }
+        }
+    }
 }
 
 function drawSplashes() {
@@ -556,16 +565,26 @@ function updateNumberOfBoids(newCount) {
 }
 
 function updateBoids() {
-    // Run the rules to update velocity vetor for all the boids. This is where the magic happens!
-    rule1_centerOfLocalMass();
-    rule2_CollisionAvoidance();
+    // Run the rules to update velocity vector for all the boids. This is where the magic happens!
+
+    rule1_centerOfLocalMass(boids);
+    rule1_centerOfLocalMass(predators)
+    rule2_CollisionAvoidance(boids);
+    rule2_CollisionAvoidance(predators);
     rule3_MatchVelocity();
-    rule4_StayWithinBounds();
-    rule5_Predator();
-    rule_LimitSpeed();
+    rule_StayWithinBounds(boids);
+    rule_StayWithinBounds(predators);
+    rule_PredatorAvoidance();
+    rule_predatorsHunt();
+    rule_LimitSpeed(boids);
+    rule_LimitSpeed(predators);
 
     // Apply velocity vector to all boids to get new location
     for(let boid of boids) {
+        boid.updateLocation();
+    }
+
+    for(let boid of predators) {
         boid.updateLocation();
     }
 }

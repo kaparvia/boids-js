@@ -73,6 +73,9 @@ html {
     /*text-shadow: 0 1px rgba(255,255,255,.4);*/
 }
 
+.button.small {
+    width: 40px;
+}
 
 #togglePredator.off {
     background-color: #101010;

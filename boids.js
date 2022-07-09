@@ -15,9 +15,11 @@
  * (3) Infection mode
  * (4) Zombie mode
  * (5) Sound when eating
+ * (6) Multiple predators
  *
  *  BUGS:
- *  - Make sure all coordinates are ints when drawing (avoids anti-aliasing so not sure if looks good)
+ *  - Predator splash fading looks off
+ *  - Add/removing boids when predator is on messes things up -> move predator(s) to separate list
  */
 const FLAG_LOG_TIMING = false;
 const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero
@@ -39,6 +41,7 @@ const FACTOR_PREDATOR_MATCHING = 0.02;
 // Visualization parameters
 const SIZE_BOID = 1.5;
 const SIZE_PREDATOR = 3.0;
+const SPLASH_FLAG = false;
 const SPLASH_TIMER_START = 5;
 const SPLASH_SIZE = 6;
 
@@ -436,14 +439,14 @@ function drawBoidTrailShort(ctx, boid) {
         ctx.lineWidth = 1;
     }
 
-    // Extend the line back 1px from the old position
+    // Extend the line back [lineWidth] pixels from the old position
     // This is to cover the gap left in the previous line when
     // drawing the black circle to remove the previous position
 
     // Take the unit vector of the velocity and inverse it
     var lenVelocity = boid.velocity.length();
-    var lastX = boid.lastLocation.x - boid.velocity.x /  lenVelocity;
-    var lastY = boid.lastLocation.y - boid.velocity.y /  lenVelocity;
+    var lastX = boid.lastLocation.x - (boid.velocity.x /  lenVelocity) * ctx.lineWidth;
+    var lastY = boid.lastLocation.y - (boid.velocity.y /  lenVelocity) * ctx.lineWidth;
 
     ctx.moveTo(lastX, lastY);
     ctx.lineTo(boid.location.x, boid.location.y);
@@ -589,7 +592,8 @@ function animationLoop() {
     }
 
     drawBoids();
-    drawSplashes();
+
+    if (SPLASH_FLAG) drawSplashes();
 
     if (FLAG_LOG_TIMING) console.timeEnd("Frame");
     if (FLAG_LOG_TIMING) console.time("Frame");

@@ -17,7 +17,6 @@
  * (5) Sound when eating
  *
  *  BUGS:
- *  - Quick tail drawing leaves black pixels in the middle of the trail
  *  - Make sure all coordinates are ints when drawing (avoids anti-aliasing so not sure if looks good)
  */
 const FLAG_LOG_TIMING = false;
@@ -128,6 +127,10 @@ class Vector {
 
     static subtract(vector1, vector2) {
         return new Vector(vector1.x - vector2.x, vector1.y - vector2.y);
+    }
+
+    toString() {
+        return '(' + this.x.toFixed(1) + ',' + this.y.toFixed(1) + ')';
     }
 }
 
@@ -433,7 +436,16 @@ function drawBoidTrailShort(ctx, boid) {
         ctx.lineWidth = 1;
     }
 
-    ctx.moveTo(boid.lastLocation.x, boid.lastLocation.y);
+    // Extend the line back 1px from the old position
+    // This is to cover the gap left in the previous line when
+    // drawing the black circle to remove the previous position
+
+    // Take the unit vector of the velocity and inverse it
+    var lenVelocity = boid.velocity.length();
+    var lastX = boid.lastLocation.x - boid.velocity.x /  lenVelocity;
+    var lastY = boid.lastLocation.y - boid.velocity.y /  lenVelocity;
+
+    ctx.moveTo(lastX, lastY);
     ctx.lineTo(boid.location.x, boid.location.y);
     ctx.stroke();
 }

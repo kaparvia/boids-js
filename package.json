@@ -1,6 +1,14 @@
 {
   "name": "boidsjs",
   "version": "1.0.0",
-  "dependencies": {
+  "description": "Boids",
+  "main": "boids.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "cypress": "^10.9.0"
   }
 }

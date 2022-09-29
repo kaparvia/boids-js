@@ -19,7 +19,6 @@
  *
  *  BUGS:
  *  - Predator splash fading looks off
- *  - Add/removing boids when predator is on messes things up -> move predator(s) to separate list
  */
 const FLAG_LOG_TIMING = false;
 const VELOCITY_RANGE = 1; // Max is 2, it means some are close to zero

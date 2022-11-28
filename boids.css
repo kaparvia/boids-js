@@ -1,5 +1,6 @@
 html {
     font-size: 62.5%;
+    font-family: "Optima, Segoe, Segoe UI, Candara, Calibri, Arial, sans-serif";
     box-sizing: border-box;
     background-color: #000;
 }
@@ -47,7 +48,6 @@ html {
     margin-left: 20px;
 
     color: #888;
-    font-family: "Optima";
     font-size: 1.5rem;
     font-weight: 500;
 }
@@ -62,7 +62,6 @@ html {
     padding: 10px 0px;
     border-radius: 3px;
     border: 1px solid #555;
-    font-family: "Optima";
     font-size: 1.7rem;
     font-weight: 500;
     text-transform: uppercase;
@@ -94,13 +93,7 @@ button:hover {
 .slider {
     width: 300px;
     margin-left: 20px;
-    /*background: #790e0e;*/
-    /*-webkit-appearance: none;  !* Override default CSS styles *!*/
-    /*appearance: none;*/
-    /*outline: none; !* Remove outline *!*/
     opacity: 0.6; /* Set transparency (for mouse-over effects on hover) */
-    /*-webkit-transition: .2s; !* 0.2 seconds transition on hover *!*/
-    /*transition: opacity .2s;*/
 }
 
 .slider:hover {
@@ -124,6 +117,3 @@ button:hover {
     padding-bottom: 5px;
 }
 
-/*VISUAL DEBUGGING */
-/*.control  { border: 1px solid #4040F0; }*/
-/*#controls { border: 1px solid #4040F0; }*/
